@@ -1,18 +1,21 @@
 import gzip
 import numpy as np
-from npstructures import RaggedArray, RaggedView
-from .sequences import Sequences
-from .encodings import BaseEncoding, ACTGTwoBitEncoding
+import cupy as cp
+from xpstructures import RaggedArray, RaggedView
+from bionumpy.sequences import Sequences
+from bionumpy.encodings import BaseEncoding, ACTGTwoBitEncoding
 NEWLINE = 10
 
 class FileBuffer:
     _buffer_divisor = 1
     COMMENT = 0
-    def __init__(self, data, new_lines):
-        self._data = data
-        self._new_lines = new_lines
+    def __init__(self, data, new_lines, is_cuda=False):
+        xp = cp if is_cuda else np
+        self._data = xp.asanyarray(data)
+        self._new_lines = xp.asanyarray(new_lines)
         self._is_validated = False
         self.size = self._data.size
+        self._is_cuda = is_cuda
 
     @classmethod
     def from_raw_buffer(cls, chunk):
@@ -22,41 +25,65 @@ class FileBuffer:
         if not self._is_validated:
             self._validate()
 
+    def to_cuda(self):
+        raise NotImplemented
+
+    def to_cpu(self):
+        raise NotImplemented
+
 class OneLineBuffer(FileBuffer):
     n_lines_per_entry = 2
     _buffer_divisor = 32
+
     @classmethod
-    def from_raw_buffer(cls, chunk):
-        new_lines = np.flatnonzero(chunk==NEWLINE)
+    def from_raw_buffer(cls, chunk, is_cuda=False):
+        xp = cp if is_cuda else np
+        new_lines = xp.flatnonzero(chunk==NEWLINE)
         n_lines = new_lines.size
         assert n_lines >= cls.n_lines_per_entry, "No complete entry in buffer"
-        new_lines = new_lines[:n_lines-(n_lines%cls.n_lines_per_entry)]
-        return cls(chunk[:new_lines[-1]+1], new_lines)
+        new_lines = new_lines[:n_lines - (n_lines % cls.n_lines_per_entry)]
+        return cls(chunk[:new_lines[-1] + 1], new_lines, is_cuda=is_cuda)
 
     def get_sequences(self):
+        xp = cp if self._is_cuda else np
         self.validate_if_not()
-        sequence_starts = self._new_lines[::self.n_lines_per_entry]+1
-        sequence_lens = self._new_lines[1::self.n_lines_per_entry]-sequence_starts
-        indices, shape = RaggedView(sequence_starts, sequence_lens).get_flat_indices()
+        sequence_starts = self._new_lines[::self.n_lines_per_entry] + 1
+        sequence_lens = self._new_lines[1::self.n_lines_per_entry] - sequence_starts
+        indices, shape = RaggedView(
+                sequence_starts, 
+                sequence_lens, 
+                is_cuda=self._is_cuda).get_flat_indices()
         m = indices.size
         d = m % self._buffer_divisor
-        seq = np.empty(m-d+self._buffer_divisor, dtype=self._data.dtype)
+        seq = xp.empty(m - d + self._buffer_divisor, dtype=self._data.dtype)
         seq[:m] = self._data[indices]
-        return Sequences(seq, shape)
+        return Sequences(seq, shape, is_cuda=self._is_cuda)
     
     def _validate(self):
+        xp = cp if self._is_cuda else np
         n_lines = self._new_lines.size
         assert n_lines % self.n_lines_per_entry == 0, "Wrong number of lines in buffer"
-        header_idxs = self._new_lines[self.n_lines_per_entry-1:-1:self.n_lines_per_entry]+1
-        assert np.all(self._data[header_idxs]==self.HEADER)
+        header_idxs = self._new_lines[self.n_lines_per_entry - 1:-1:self.n_lines_per_entry] + 1
+        assert xp.all(self._data[header_idxs]==self.HEADER)
         self._is_validated = True
 
+    def to_cuda(self):
+        self._is_cuda = True
+        self._data = cp.asanyarray(self._data)
+        self._new_lines = cp.asanyarray(self._new_lines)
+
+    def to_cpu(self):
+        if self._is_cuda:
+            self._data = self._data.asnumpy()
+            self._new_lines = self._new_lines.asnumpy()
+            self._is_cuda = False
+
 class OneLineFastaBuffer(OneLineBuffer):
-    HEADER= 62
+    HEADER = 62
     n_lines_per_entry = 2
 
 class FastQBuffer(OneLineBuffer):
-    HEADER= 64
+    HEADER = 64
     n_lines_per_entry = 4
     _encoding = BaseEncoding
 
@@ -89,7 +116,7 @@ class BufferedNumpyParser:
             return None
         
         # Ensure that the last entry ends with newline. Makes logic easier later
-        if self._is_finished  and a[bytes_read-1] != NEWLINE:
+        if self._is_finished and a[bytes_read - 1] != NEWLINE:
             a[bytes_read] = NEWLINE
             bytes_read += 1
         return a[:bytes_read]
@@ -113,7 +140,7 @@ class BufferedNumpyParser:
         buff = self._buffer_type.from_raw_buffer(chunk)
         while not self._is_finished:
             buff = self._buffer_type.from_raw_buffer(chunk)
-            self._file_obj.seek(buff.size-self._chunk_size, 1)
+            self._file_obj.seek(buff.size - self._chunk_size, 1)
             yield buff
             chunk = self.get_chunk()
         if chunk is not None and chunk.size:

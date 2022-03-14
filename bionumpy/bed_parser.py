@@ -1,7 +1,8 @@
-from .parser import FileBuffer, NEWLINE, get_mask_from_intervals
-from .chromosome_map import *
+from bionumpy.parser import FileBuffer, NEWLINE, get_mask_from_intervals
+from bionumpy.chromosome_map import *
 from dataclasses import dataclass
 import numpy as np
+import cupy as cp
 
 class DelimitedBuffer(FileBuffer):
     DELIMITER = ord("\t")

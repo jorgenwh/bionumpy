@@ -1,12 +1,12 @@
 import numpy as np
-from .encodings import ACTGTwoBitEncoding, BaseEncoding
-from npstructures import RaggedArray
-
+import cupy as cp
+from bionumpy.encodings import ACTGTwoBitEncoding, BaseEncoding
+from xpstructures import RaggedArray
 
 class Sequences(RaggedArray):
 
-    def __init__(self, data, shape=None, encoding=BaseEncoding):
-        super().__init__(data, shape, dtype=np.uint8)
+    def __init__(self, data, shape=None, encoding=BaseEncoding, is_cuda=False):
+        super().__init__(data, shape, dtype=np.uint8, is_cuda=is_cuda)
         self.encoding = encoding
 
     @classmethod

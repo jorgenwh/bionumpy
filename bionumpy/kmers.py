@@ -1,15 +1,19 @@
 import numpy as np
-from .encodings import twobit_swap, ACTGTwoBitEncoding
-from npstructures import RaggedArray
+import cupy as cp
+from bionumpy.encodings import twobit_swap, ACTGTwoBitEncoding
+from xpstructures import RaggedArray
 
 class TwoBitHash:
-    def __init__(self, k=31, dtype=np.uint64):
+    def __init__(self, k=31, dtype=np.uint64, is_cuda=False):
+        self._is_cuda = is_cuda
+        xp = cp if self._is_cuda else np
+
         self._dtype = dtype
         self.k = k
-        self._mask = dtype(4**k-1)
-        self._n_letters_in_dtype = 4*dtype(0).nbytes
-        self._shifts = dtype(2)*np.arange(self._n_letters_in_dtype, dtype=dtype)
-        self._rev_shifts = self._shifts[::-1]+dtype(2)
+        self._mask = dtype(4**k - 1)
+        self._n_letters_in_dtype = 4 * dtype(0).nbytes
+        self._shifts = dtype(2) * xp.arange(self._n_letters_in_dtype, dtype=dtype)
+        self._rev_shifts = self._shifts[::-1] + dtype(2)
 
     def get_kmers_with_buffer(self, sequence):
         res = (sequence[:-1, None] >> self._shifts)
@@ -24,16 +28,19 @@ class TwoBitHash:
 
     def _has_buffer(self, sequences):
         last_end = sequences.shape.size # intervals[1][-1]
-        return sequences._data.size*4 - last_end>=self._n_letters_in_dtype-self.k+1
+        return sequences._data.size * 4 - last_end>=self._n_letters_in_dtype-self.k + 1
 
     def get_kmer_hashes(self, sequences):
+        assert self._is_cuda == sequences._is_cuda
+        print(self._is_cuda)
+
         data = ACTGTwoBitEncoding.from_bytes(sequences._data)
         shape = sequences.shape
         func = self.get_kmers_with_buffer if self._has_buffer(sequences) else self.get_kmers
         kmers = func(data.view(self._dtype)).ravel()
-        ra = RaggedArray(kmers, shape)
+        ra = RaggedArray(kmers, shape, is_cuda=self._is_cuda)
         ra = ra[:, :-(self.k-1)]
-        return ACTGTwoBitEncoding.complement(ra._data) & self._dtype(4**self.k-1)
+        return ACTGTwoBitEncoding.complement(ra._data) & self._dtype(4**self.k - 1)
 
 class KmerHash:
     CODES = np.zeros(256, dtype=np.uint64)
