@@ -11,13 +11,21 @@ def generate_random_sequence(num_bases):
 if __name__ == "__main__":
     output_filename = sys.argv[1]
     num_bases = int(sys.argv[2])
-    
-    sequence = generate_random_sequence(num_bases)
+    num_lines = int(sys.argv[3])
 
+    assert num_bases >= num_lines 
+
+    remaining = num_bases
     f = open(output_filename, "w")
-    f.write(f">Randomly generated sequence of {num_bases} base-pairs.\n")
-    f.write(sequence)
-    f.close()
 
+    while remaining > 0:
+        n = min(num_bases // num_lines, remaining)
+        sequence = generate_random_sequence(n)
+        f.write(f">Randomly generated sequence of {num_bases} base-pairs.\n")
+        f.write(sequence)
+
+        remaining -= n
+
+    f.close()
     print("File generated.")
 
