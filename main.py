@@ -1,16 +1,16 @@
 import sys
 import time
 
-from bionumpy.parser import BufferedNumpyParser
-from bionumpy.kmers import TwoBitHash
+from bionumpy.parser import NpBufferStream
+from bionumpy.kmers import KmerEncoding 
 
 k = 31
 #cuda = True 
 cuda = int(sys.argv[2])
 print(f"cuda: {cuda}")
 
-parser = BufferedNumpyParser.from_filename(sys.argv[1], chunk_size=10000000)
-hasher = TwoBitHash(k=k, is_cuda=cuda)
+parser = NpBufferStream.from_filename(sys.argv[1], chunk_size=10000000)
+hasher = KmerEncoding(k=k, is_cuda=cuda)
 
 t = time.time_ns()
 for chunk in parser.get_chunks():
